@@ -1,0 +1,516 @@
+{
+  "name": "LeadClassifyer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "4915a282-275e-4bd9-a02f-ea6447149f48",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "b2b19251-e530-4785-b212-d70a5c71d096",
+      "name": "Webhook",
+      "webhookId": "4915a282-275e-4bd9-a02f-ea6447149f48"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7d3775e1-caac-4b0f-a518-7b83976437d6",
+              "leftValue": "={{ $json.name != null && ($json.email != null || $json.phone != null) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "67ac22f3-ddc1-4989-834d-26e03595e1d7",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const lead = $('If').item.json; // change 'If' if your validation node has a different name\nconst raw = $json.choices?.[0]?.message?.content ?? null;\n\nlet classification = null;\nlet reasoning = null;\nlet parse_error = null;\n\ntry {\n  const parsed = JSON.parse(raw);\n  classification = String(parsed.classification ?? '').trim().toUpperCase();\n  reasoning = parsed.reasoning ?? null;\n\n  if (!['HOT', 'WARM', 'COLD'].includes(classification)) {\n    throw new Error(`Invalid classification value: ${parsed.classification}`);\n  }\n  if (!reasoning) {\n    throw new Error('Missing reasoning field');\n  }\n} catch (e) {\n  parse_error = e.message;\n  classification = null;\n}\n\nreturn {\n  json: {\n    ...lead,\n    classification,\n    reasoning,\n    parse_error,\n    raw_llm_output: raw,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -192
+      ],
+      "id": "9741708d-1fa3-4eb6-8a3e-8b5458763429",
+      "name": "Parse Classification"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n    const data = item.json.body || {};\n    \n    const name = data.full_name || data.lead_name || (data.contact && data.contact.name) || null;\n    const email = data.email_address || data.contact_email || null;\n    \n    let phone = data.phone_number || (data.contact && data.contact.phone) || null;\n    if (phone === \"\") phone = null;\n\n    const source = data.utm_source || data.channel || data.referral_partner || data.source || \"unknown\";\n    const message = data.notes || data.message_body || data.comments || null;\n    \n    return {\n        json: {\n            name: name,\n            email: email,\n            phone: phone,\n            source: source,\n            message: message,\n            timestamp: new Date().toISOString()\n        }\n    };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "0e562978-7610-4e19-a5c7-8a436f2f6597",
+      "name": "Normalizer"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dfa6ecfd-f372-4a0e-b99c-73b929817065",
+              "leftValue": "={{ $json.parse_error === null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        -192
+      ],
+      "id": "efc8f71c-0125-490d-8875-a5b17fd2309b",
+      "name": "Parse Ok?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/REPLACE_ME",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  text: \":rotating_light: *Lead workflow failure*\\n*Step:* \" + $json.failed_step +\n        \"\\n*Detail:* \" + $json.error_detail +\n        \"\\n*Time:* \" + $json.timestamp +\n        \"\\n*Raw payload:*\\n```\" + JSON.stringify($json.raw_payload, null, 2) + \"```\"\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1616,
+        128
+      ],
+      "id": "4401169c-0c85-4ef5-a0c7-f85278881afe",
+      "name": "Slack Alert"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const wh = $('Webhook').item.json;\n\nreturn {\n  json: {\n    failed_step: 'Validation (If node)',\n    error_detail: 'Missing name and/or a contact method (email or phone)',\n    raw_payload: wh.body ?? wh,\n    normalized: $json,\n    timestamp: new Date().toISOString(),\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ],
+      "id": "acc036d3-41c8-40bd-830b-c9d3ed0e93e9",
+      "name": "Tag: Validation Failed"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/REPLACE_ME",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const l = $('Parse Classification').item.json;\n  return JSON.stringify({\n    text: (l.classification === \"HOT\" ? \":fire:\" : l.classification === \"WARM\" ? \":sunny:\" : \":snowflake:\") +\n          \" *New lead: \" + l.classification + \"*\" +\n          \"\\n*Name:* \" + l.name +\n          \"\\n*Email:* \" + (l.email ?? \"n/a\") +\n          \"\\n*Phone:* \" + (l.phone ?? \"n/a\") +\n          \"\\n*Source:* \" + l.source +\n          \"\\n*Message:* \" + (l.message ?? \"(none)\") +\n          \"\\n*AI reasoning:* \" + l.reasoning\n  });\n})() }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1696,
+        -288
+      ],
+      "id": "e916bd2f-5379-4858-9606-8907de16018a",
+      "name": "Slack New Lead"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const wh = $('Webhook').item.json;\nconst err = $json.error ?? $json;\n\nreturn {\n  json: {\n    failed_step: 'LLM call (Groq HTTP Request)',\n    error_detail: err.message ?? JSON.stringify(err).slice(0, 500),\n    raw_payload: wh.body ?? wh,\n    timestamp: new Date().toISOString(),\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        -32
+      ],
+      "id": "04be71c0-faf6-44be-b7b7-6bbe61fbe3c7",
+      "name": "Tag: LLM Call Failed"
+    },
+    {
+      "parameters": {
+        "jsCode": "const wh = $('Webhook').item.json;\n\nreturn {\n  json: {\n    failed_step: 'LLM output parsing',\n    error_detail: $json.parse_error + ' | raw output: ' + String($json.raw_llm_output ?? '').slice(0, 300),\n    raw_payload: wh.body ?? wh,\n    timestamp: new Date().toISOString(),\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        -64
+      ],
+      "id": "284d2684-3065-4e8c-a0c6-4a7ba1276070",
+      "name": "Tag: Parse Failed"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "17DEySOAxfe2oG-BfCrbQLoL4cDaSQPGy7lJasV-2HzU",
+          "mode": "list",
+          "cachedResultName": "Spark Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17DEySOAxfe2oG-BfCrbQLoL4cDaSQPGy7lJasV-2HzU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17DEySOAxfe2oG-BfCrbQLoL4cDaSQPGy7lJasV-2HzU/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json.name }}",
+            "Phone": "={{ $json.phone ?? '' }}",
+            "Email": "={{ $json.email ?? '' }}",
+            "Message": "={{ $json.message ?? '' }}",
+            "Source": "={{ $json.source }}",
+            "Lead Classification": "={{ $json.classification }}",
+            "AI Reasoning": "={{ $json.reasoning }}",
+            "Email Verified": "No",
+            "Date Added": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Message",
+              "displayName": "Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Lead Classification",
+              "displayName": "Lead Classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "AI Reasoning",
+              "displayName": "AI Reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Date Added",
+              "displayName": "Date Added",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email Verified",
+              "displayName": "Email Verified",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1344,
+        -288
+      ],
+      "id": "3868c236-365f-4b18-8351-5804de600b5b",
+      "name": "Add lead to sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "uFnfSekgzuaskAhL",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"openai/gpt-oss-20b\",\n  temperature: 0,\n  reasoning_effort: \"low\",\n  response_format: { type: \"json_object\" },\n  messages: [\n    {\n      role: \"system\",\n      content: \"You are a lead routing assistant. Classify the inbound lead's intent as HOT, WARM, or COLD. Respond ONLY with valid JSON in this exact format: {\\\"classification\\\": \\\"HOT|WARM|COLD\\\", \\\"reasoning\\\": \\\"one sentence\\\"}\"\n    },\n    {\n      role: \"user\",\n      content: \"Lead message: \" + ($json.message ?? \"\")\n    }\n  ]\n}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "234c0033-670f-41f3-a913-fc7a7b7b54cd",
+      "name": "HTTP Request (Groq)",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MlWNX4z9kIesF0jl",
+          "name": "Header Auth Groq"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tag: Validation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizer": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "node": "Parse Ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag: Validation Failed": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Ok?": {
+      "main": [
+        [
+          {
+            "node": "Add lead to sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tag: Parse Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag: LLM Call Failed": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag: Parse Failed": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add lead to sheet": {
+      "main": [
+        [
+          {
+            "node": "Slack New Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Parse Classification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tag: LLM Call Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f7f9efb7-74e9-45de-951e-f40baebd6b3b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2272a32bf4378ba3ffa3c9c0b9f3c8aefcb424704b0e5e53c2cf9d3b6cb75c37"
+  },
+  "nodeGroups": [],
+  "id": "uNsnnJu0nUFVulqX",
+  "tags": []
+}
