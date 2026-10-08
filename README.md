@@ -2,8 +2,6 @@
 
 Inbound leads arrive from different places (website forms, WhatsApp, referral partners) with different field names and missing values. This project cleans them up, scores them with an LLM, logs them to Google Sheets, verifies their emails and posts to Slack, and alerts the team whenever something breaks.
 
-**Demo video:** <https://www.loom.com/share/167b9a9d3fc2455799fd9110141d87c2>
-
 ## Stack
 n8n (self-hosted in Docker) · Groq LLM API · Google Sheets · Slack incoming webhooks · AbstractAPI · JavaScript (Code nodes)
 
